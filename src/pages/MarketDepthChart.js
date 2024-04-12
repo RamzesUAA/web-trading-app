@@ -1,40 +1,58 @@
 import React, { useState, useEffect } from 'react';
-import Highcharts from 'highcharts'
-import HighchartsReact from 'highcharts-react-official'
-import { getOrderBook } from '../backend/api';
+import Highcharts from 'highcharts';
+import HighchartsReact from 'highcharts-react-official';
+import * as signalR from '@microsoft/signalr';
 
 const MarketDepthChart = () => {
   const [marketDepthData, setMarketDepthData] = useState(null);
   const [userBtcAmount, setUserBtcAmount] = useState(0);
   const [userQuote, setUserQuote] = useState(0);
+  const [hubConnection, setHubConnection] = useState(null);
 
   const calculateQuote = () => {
     if (!marketDepthData || !userBtcAmount) return;
 
     const bestAskPrice = marketDepthData.asks[0][0];
-    console.log(bestAskPrice * userBtcAmount)
-
-    
     setUserQuote(bestAskPrice * userBtcAmount);
   };
-
+console.log(process.env.REACT_APP_SIGNALR_CONNECTION)
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const response = await getOrderBook();
-        const bids = response.bids.slice(0, 500).map(([price, volume]) => [price, volume]);
-        const asks = response.asks.slice(0, 500).map(([price, volume]) => [price, volume]);
-        console.log(response)
-        calculateQuote();
-        setMarketDepthData({ bids, asks });
-      } catch (error) {
-        console.error('Error fetching market depth data:', error);
+    const newHubConnection = new signalR.HubConnectionBuilder()
+      .withUrl(process.env.REACT_APP_SIGNALR_CONNECTION + "orderbookhub")
+      .configureLogging(signalR.LogLevel.Information)
+      .build();
+
+
+    setHubConnection(newHubConnection);
+
+    return () => {
+      if (hubConnection) {
+        hubConnection.stop();
       }
     };
-    const intervalId = setInterval(fetchData, 5000);
-
-    return () => clearInterval(intervalId);
   }, []);
+
+  useEffect(() => {
+    if (hubConnection) {
+      hubConnection
+        .start()
+        .then(() => {
+          console.log('Connection established.');
+          hubConnection.on('ReceiveOrderBookUpdate', (orderBook) => {
+            const bids = orderBook.bids.slice(0, 200).map(([price, volume]) => [price, volume]);
+            const asks = orderBook.asks.slice(0, 200).map(([price, volume]) => [price, volume]);
+            setMarketDepthData({ bids, asks });
+          });
+        })
+        .catch((error) => {
+          console.error('Error establishing connection:', error);
+        });
+    }
+  }, [hubConnection]);
+
+  useEffect(() => {
+    calculateQuote();
+  }, [marketDepthData, userBtcAmount]);
 
   const handleBtcAmountChange = (event) => {
     setUserBtcAmount(parseFloat(event.target.value));
@@ -47,7 +65,7 @@ const MarketDepthChart = () => {
       zoomType: 'xy'
     },
     title: {
-      text: 'ETH-BTC Market Depth'
+      text: 'BTC-EUR Market Depth'
     },
     xAxis: {
       minPadding: 0,
@@ -116,8 +134,6 @@ const MarketDepthChart = () => {
     }]
   };
 
-  console.log(marketDepthData?.bids)
-
   return (
     <div>
       <input
@@ -126,7 +142,7 @@ const MarketDepthChart = () => {
         value={userBtcAmount}
         onChange={handleBtcAmountChange}
       />
-      <p>Quote: {userQuote.toFixed(2)} USD</p>
+      <p>Quote: {userQuote.toFixed(2)} EUR</p>
       <HighchartsReact highcharts={Highcharts} options={options} />
     </div>
   );
